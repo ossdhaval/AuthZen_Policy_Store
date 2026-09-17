@@ -80,7 +80,7 @@ This document defines the AuthZEN Policy Store API and the Policy Store format f
 
 The Policy Store API is implemented by a conforming Policy Decision Point (PDP). It provides a standard way to supply authorization policies and the artifacts required to evaluate them to a PDP.
 
-The Policy Store format defines a canonical, PDP-neutral directory structure for organizing authorization policies and their associated metadata. It provides a common structure for policies, schemas, default entities, trusted token issuers, and other artifacts required for policy evaluation. Using a well-known structure reduces the need for PDP-specific configuration. It also improves the discoverability and portability of these artifacts across ecosystem tools like policy authoring tools, management, and deployment tools.
+The Policy Store format defines a canonical, PDP-neutral directory structure for organizing authorization policies and their associated metadata. It provides a common structure for policies, schemas, default entities, trusted token issuers, custom token issuers, and other artifacts required for policy evaluation. Using a well-known structure reduces the need for PDP-specific configuration. It also improves the discoverability and portability of these artifacts across ecosystem tools like policy authoring tools, management, and deployment tools.
 
 This specification also defines a compressed archive format (.cjar, Constraint JAR) for packaging a Policy Store for distribution, versioning, and deployment. 
 
@@ -134,6 +134,18 @@ Constraint JAR (CJAR):
 Policy Decision Point (PDP):
 : A component that evaluates authorization requests against policies. See {{AUTHZEN-API}}.
 
+Policy Administration Point (PAP):
+: A component or system used by administrators to manage the lifecycle of policies and related artifacts, including the policy store.
+
+Custom Token:
+: A token that requires specialized processing. For example: non-JWT tokens, API keys, or tokens that use a custom encryption algorithm.
+
+Custom Issuer:
+: The issuer that issues one or more custom tokens. These issuers are declared in `custom-issuers/`. Refer to Custom Issuers ({{custom-issuers}}) for more details.
+
+Token Processor:
+: The component that validates and processes a custom token. Its interface and registration mechanism are out of scope for this specification.
+
 # Overview
 
 ## Policy store API
@@ -150,6 +162,7 @@ A **policy store** bundles together the artifacts that a PDP needs to evaluate a
 * Optional policy templates (`templates/`)
 * Optional default entities (`entities/`)
 * Optional trusted issuer configuration (`trusted-issuers/`)
+* Optional custom issuer configuration (`custom-issuers/`)
 
 This document does not define the syntax and semantics of policy documents, schema files, and entity types. These are defined by the declared policy language. This specification defines the container layout, metadata, and interchange formats only.
 
@@ -164,7 +177,7 @@ Policy Store API defines `/access/v1/policy-store` endpoint for uploading the po
 ## Usage
 
 - Conforming PDPs should implement the `/access/v1/policy-store` endpoint
-- A policy administrator or a Policy Administration Point(PAP) should use this PDP endpoint to upload the policy store (cjar) to the PDP
+- A policy administrator or a PAP should use this PDP endpoint to upload the policy store (cjar) to the PDP
 - Before uploading the policy store to the PDP, the policy administrator MUST ensure the validity of the policy store and correct version management. 
 - PDP implementations MUST not implement policy store lifecycle management capability using this endpoint.
 
@@ -239,7 +252,9 @@ policy-store-root/
 │   └── (one template document per file)
 ├── entities/           (optional)
 │   └── *.json
-└── trusted-issuers/    (optional)
+├── trusted-issuers/    (optional)
+│   └── *.json
+└── custom-issuers/     (optional)
     └── *.json
 ~~~
 {: title="Policy Store Directory Layout"}
@@ -265,6 +280,9 @@ policy-store-root/
 
 `trusted-issuers/`:
 : OPTIONAL. Contains trusted issuer configuration files as defined in Trusted Issuers ({{trusted-issuers}}).
+
+`custom-issuers/`:
+: OPTIONAL. Contains custom issuer configuration files as defined in Custom Issuers ({{custom-issuers}}).
 
 # File Naming and Content Requirements
 
@@ -312,6 +330,13 @@ Files under `trusted-issuers/` MUST:
 
 * Use the `.json` file extension.
 * Contain a single trusted issuer configuration object as defined in Trusted Issuers ({{trusted-issuers}}).
+
+## Custom Issuer Files
+
+Each file under `custom-issuers/` MUST:
+
+* Use the `.json` file extension.
+* Contain a single custom issuer configuration object as defined in Custom Issuers ({{custom-issuers}}).
 
 ## Schema Files
 
@@ -447,6 +472,87 @@ Organization MAY define additional fields within token type entries or at the is
 ~~~
 {: title="Example trusted issuer configuration"}
 
+# Custom Issuers {#custom-issuers}
+
+Trusted issuer configuration ({{trusted-issuers}}) describes issuers whose tokens a PDP can validate using JSON Web Token ({{RFC7519}}) mechanisms and an issuer configuration document. Non-JWT tokens require specialized processing. These tokens include API keys, opaque session handles, vendor-specific or legacy token formats, and tokens that use encryption or signature algorithms the PDP does not implement natively.
+
+Custom issuer configuration files describe the issuers of such custom tokens. They declare the schema entity types those tokens should be mapped to during policy evaluation. A PDP validates a custom token using a token processor rather than the mechanisms defined for trusted issuers. Token processor contains the logic to interpret and validate custom tokens. This component may be owned by the organization or 
+PDP.
+
+Consistent with the scope of this specification, this section defines the configuration artifact only. It does not define how a PDP validates a custom token, how a token processor is implemented or registered, or how a validated token is materialized as an entity. 
+
+## Structure
+
+Each custom issuer file MUST be a JSON object with:
+
+`id`:
+: REQUIRED string. Unique identifier for the issuer. It MUST be a URI conforming to RFC 3986 and MUST uniquely identify the issuer within the policy store.
+
+`name`:
+: REQUIRED non-empty string. Short human-readable name.
+
+`description`:
+: OPTIONAL string.
+
+`token_metadata`:
+: REQUIRED non-empty object. Maps schema entity type names to per-type configuration objects. Each key names an entity type, defined in the policy store's schema, that tokens from this issuer materialize as (for example, `Acme::ApiKey` in Cedar).
+
+Unlike a trusted issuer, a custom issuer has no `configuration_endpoint`. Token validation logic is outside the scope of this specification and may be a part of token processor implementation.
+
+A schema entity type name MUST NOT be declared by more than one custom issuer within a policy store, and MUST NOT collide with an `entity_type_name` used by any trusted issuer token type entry in the same store. A policy store that violates either constraint is invalid.
+
+### token_metadata Entry
+
+For each schema entity type key in `token_metadata`, the value object MAY include:
+
+`required`:
+: OPTIONAL boolean. Declares whether the deployment intends tokens of this type to be mandatory for evaluation. Default is `false` when omitted. The consequences of a missing or invalid token are PDP-specific.
+
+`required_claims`:
+: OPTIONAL array of claim names that the deployment expects to be present in the processed token.
+
+The value object MUST NOT be empty; it MUST contain at least one of `required` or `required_claims`.
+
+Organizations MAY define additional fields within entries or at the issuer object level. Such extensions MUST NOT alter the meaning of fields defined in this specification. Interoperable tools SHOULD preserve unknown fields when reading and writing policy stores.
+
+## Relationship to Trusted Issuers
+
+| | Trusted issuer | Custom issuer |
+| :--- | :--- | :--- |
+| Declared in | `trusted-issuers/` | `custom-issuers/` |
+| Configuration document | REQUIRED (`configuration_endpoint`) | None |
+| Token validation | JWT mechanisms ({{RFC7519}}) | Token processor |
+| `token_metadata` keyed by | Token type name (for example, `access_token`) | Schema entity type name (for example, `Acme::ApiKey`) |
+| Entity type named by | `entity_type_name` field within the entry | The entry key |
+
+A policy store MAY contain both directories, either, or neither.
+
+## PDP Support
+
+A custom issuer configuration does not identify the token processor that handles a given entity type; the binding between a declared type and a processor is deployment configuration outside the policy store.
+
+Because of this, a PDP loading a policy store that declares custom issuers is responsible for determining whether it can process each declared entity type. A PDP SHOULD perform this check while loading the policy store and reject the store if it cannot, rather than deferring the failure to the first evaluation request that presents such a token.
+
+### Example (non-normative)
+
+~~~ json
+{
+  "id": "https://acme.example/issuers/api-keys",
+  "name": "Acme API Keys",
+  "description": "Opaque API keys issued by the Acme developer portal",
+  "token_metadata": {
+    "Acme::ApiKey": {
+      "required": true,
+      "required_claims": ["sub", "scope"]
+    },
+    "Acme::SessionKey": {
+      "required": false
+    }
+  }
+}
+~~~
+{: title="Example custom issuer configuration"}
+
 # Archive Format {#archive-format}
 
 The Archive Format packages the Directory Format as a ZIP archive (Constraint JAR, `.cjar`).
@@ -468,8 +574,9 @@ PDPs and tools that load policy stores SHOULD perform the following steps:
 2. Verify required files and directories exist.
 3. Parse and validate `metadata.json`.
 4. Confirm the implementation supports the declared `policy_language` and `policy_language_version`, or reject the store.
-5. If present, load `schema/`; then load policies and optional templates, entities, and trusted issuers according to policy engine rules.
+5. If present, load `schema/`; then load policies and optional templates, entities, trusted issuers, and custom issuers according to policy engine rules.
 6. Verify policy engine-specific requirements if any(such as unique policy identifiers).
+7. If `custom-issuers/` is present, verify that no schema entity type is declared by more than one custom issuer or collides with a trusted issuer `entity_type_name` ({{custom-issuers}}), and determine whether the implementation can process each declared entity type ({{custom-issuers}}).
 
 Failure at any REQUIRED validation step SHOULD result in rejecting the policy store for evaluation.
 
@@ -578,6 +685,16 @@ Trusted issuer configuration determines which token issuers a PDP accepts. Incor
 
 Policy stores SHOULD be treated as part of the trusted computing base for authorization decisions. Loading a policy store from an untrusted source without validation is NOT RECOMMENDED.
 
+## Custom issuers
+
+Custom issuer configuration ({{custom-issuers}}) moves credential validation out of the mechanisms defined for trusted issuers and into a deployment-supplied token processor. The token processor part of the trusted computing base for authorization decisions.
+
+Schema entity type collisions are a privilege-escalation risk: if two issuers could declare the same entity type, a token validated under weaker rules could materialize as an entity that policies treat as higher-privilege. This is why {{custom-issuers}} requires entity type declarations to be unique across both custom and trusted issuers within a store.
+
+Because a custom issuer has no configuration document, there is no standard mechanism for key rotation, token status, or revocation. Deployments that accept custom tokens MUST provide these controls through the token processor or surrounding infrastructure.
+
+Declaring a type with `required` set to `false` reduces the evidence a PDP may require at evaluation time. Deployments SHOULD review policies that reference such types to confirm that a decision remains correct when tokens of that type are absent.
+
 ## Policy store API
 
 PDP should protect this API endpoint by taking appropriate measures to authenticate and authorise the request in accordance with [Authorization API guidelines](https://openid.net/specs/authorization-api-1_0.html#section-11.2)
@@ -677,6 +794,42 @@ The following JSON Schemas illustrate the structure of normative JSON artifacts.
 }
 ~~~
 
+## Custom Issuer Schema
+
+~~~ json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["id", "name", "token_metadata"],
+  "properties": {
+    "id": { "type": "string", "format": "uri"},
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "token_metadata": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "required": { "type": "boolean", "default": false },
+            "required_claims": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}
+~~~
+
 ## Entity File Schema
 
 ~~~ json
@@ -737,8 +890,10 @@ todo-app-policy-store/
 │   └── jack-search-access.cedar
 ├── entities/
 │   └── default-roles.json
-└── trusted-issuers/
-    └── acme-idp.json
+├── trusted-issuers/
+│   └── acme-idp.json
+└── custom-issuers/
+    └── acme-apikeys.json
 ~~~
 
 **metadata.json:**
@@ -832,6 +987,7 @@ The following topics may be addressed in future revisions:
 * How policy templates are instantiated and linked to policies in multi-file layouts.
 * Expression and validation of cross-policy dependencies.
 * Subdirectory organization conventions under `policies/` per policy language.
+
 
 # Notices
 
