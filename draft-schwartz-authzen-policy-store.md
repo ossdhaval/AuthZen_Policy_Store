@@ -350,6 +350,11 @@ The `metadata.json` file provides version and descriptive metadata for the polic
 
 The top-level JSON object MUST contain the following keys:
 
+`policy_store_spec_version`:
+: REQUIRED string. Identifies the version of the AuthZEN Policy Store specification that this policy store conforms to. This revision of the specification defines the value `"1.0"`.
+
+: Consistent with the versioning conventions of the AuthZEN Authorization API ({{AUTHZEN-API}}), the specification version and the endpoint path segment are distinct: version `1.0` corresponds to `v1` in endpoint identifiers, such as the `/access/v1/policy-store` endpoint defined by this specification.
+
 `policy_language`:
 : REQUIRED string. Identifies the policy language (for example, `"cedar"`, `"cel"`). Values SHOULD be lowercase alphanumeric strings; hyphens MAY separate words.
 
@@ -397,6 +402,7 @@ in the policy store should be applied.
 
 ~~~ json
 {
+  "policy_store_spec_version": "1.0",
   "policy_language": "cedar",
   "policy_language_version": "4.4.0",
   "policy_store": {
@@ -436,22 +442,16 @@ Each trusted issuer file MUST be a JSON object with:
 : REQUIRED string. URI of the issuer configuration document (for example, OpenID Provider URI per {{RFC8615}}).
 
 `token_metadata`:
-: OPTIONAL object. Maps token type names (such as `access_token`, `id_token`) to per-type configuration objects.
+: OPTIONAL object. Maps schema entity type names to per-type configuration objects. Each key names an entity type, defined in the policy store's schema, that tokens from this issuer are materialized as (for example, `Acme::Access_token` in Cedar, or a Cerbos principal schema reference).
 
 ### token_metadata Entry
 
-For each token type key in `token_metadata`, the value object MAY include:
-
-`entity_type_name`:
-: REQUIRED when the token type entry is present. Type name in the policy store's schema used when materializing tokens as principals or entities (for example, `Acme::Access_token` in Cedar, or a Cerbos principal schema reference).
-
-`trusted`:
-: OPTIONAL boolean. When `false`, tokens of this type from this issuer MUST be rejected. Default is `true` when omitted.
+For each schema entity type key in `token_metadata`, the value object MUST include:
 
 `required_claims`:
-: OPTIONAL array of JWT claim names that MUST be present for the token to be considered valid.
+: REQUIRED array of JWT claim names that MUST be present for the token to be considered valid.
 
-Organization MAY define additional fields within token type entries or at the issuer object level. Such extensions MUST NOT alter the meaning of fields defined in this specification. Interoperable tools SHOULD preserve unknown fields when reading and writing policy stores.
+Organization MAY define additional fields within entity type entries or at the issuer object level. Such extensions MUST NOT alter the meaning of fields defined in this specification. Interoperable tools SHOULD preserve unknown fields when reading and writing policy stores.
 
 ### Example (non-normative)
 
@@ -462,9 +462,7 @@ Organization MAY define additional fields within token type entries or at the is
   "description": "Corporate identity provider",
   "configuration_endpoint": "https://idp.example.com/.well-known/openid-configuration",
   "token_metadata": {
-    "access_token": {
-      "trusted": true,
-      "entity_type_name": "Acme::Access_token",
+    "Acme::Access_token": {
       "required_claims": ["jti", "iss", "aud", "sub", "exp", "nbf"]
     }
   }
@@ -499,33 +497,20 @@ Each custom issuer file MUST be a JSON object with:
 
 Unlike a trusted issuer, a custom issuer has no `configuration_endpoint`. Token validation logic is outside the scope of this specification and may be a part of token processor implementation.
 
-A schema entity type name MUST NOT be declared by more than one custom issuer within a policy store, and MUST NOT collide with an `entity_type_name` used by any trusted issuer token type entry in the same store. A policy store that violates either constraint is invalid.
+A schema entity type name MUST NOT be declared by more than one issuer within a policy store, whether custom or trusted. A policy store that violates this constraint is invalid.
 
 ### token_metadata Entry
 
-For each schema entity type key in `token_metadata`, the value object MAY include:
-
-`required`:
-: OPTIONAL boolean. Declares whether the deployment intends tokens of this type to be mandatory for evaluation. Default is `false` when omitted. The consequences of a missing or invalid token are PDP-specific.
+For each schema entity type key in `token_metadata`, the value object MUST include:
 
 `required_claims`:
-: OPTIONAL array of claim names that the deployment expects to be present in the processed token.
+: REQUIRED array of claim names that the deployment expects to be present in the processed token.
 
-The value object MUST NOT be empty; it MUST contain at least one of `required` or `required_claims`.
+All token types declared by a custom issuer are optional for evaluation. A PDP uses the custom tokens that are present in an authorization request and ignores those that are absent.
 
 Organizations MAY define additional fields within entries or at the issuer object level. Such extensions MUST NOT alter the meaning of fields defined in this specification. Interoperable tools SHOULD preserve unknown fields when reading and writing policy stores.
 
-## Relationship to Trusted Issuers
-
-| | Trusted issuer | Custom issuer |
-| :--- | :--- | :--- |
-| Declared in | `trusted-issuers/` | `custom-issuers/` |
-| Configuration document | REQUIRED (`configuration_endpoint`) | None |
-| Token validation | JWT mechanisms ({{RFC7519}}) | Token processor |
-| `token_metadata` keyed by | Token type name (for example, `access_token`) | Schema entity type name (for example, `Acme::ApiKey`) |
-| Entity type named by | `entity_type_name` field within the entry | The entry key |
-
-A policy store MAY contain both directories, either, or neither.
+A policy store MAY contain `trusted-issuers/` and `custom-issuers/`, either, or neither.
 
 ## PDP Support
 
@@ -542,11 +527,10 @@ Because of this, a PDP loading a policy store that declares custom issuers is re
   "description": "Opaque API keys issued by the Acme developer portal",
   "token_metadata": {
     "Acme::ApiKey": {
-      "required": true,
       "required_claims": ["sub", "scope"]
     },
     "Acme::SessionKey": {
-      "required": false
+      "required_claims": ["sid"]
     }
   }
 }
@@ -576,7 +560,8 @@ PDPs and tools that load policy stores SHOULD perform the following steps:
 4. Confirm the implementation supports the declared `policy_language` and `policy_language_version`, or reject the store.
 5. If present, load `schema/`; then load policies and optional templates, entities, trusted issuers, and custom issuers according to policy engine rules.
 6. Verify policy engine-specific requirements if any(such as unique policy identifiers).
-7. If `custom-issuers/` is present, verify that no schema entity type is declared by more than one custom issuer or collides with a trusted issuer `entity_type_name` ({{custom-issuers}}), and determine whether the implementation can process each declared entity type ({{custom-issuers}}).
+7. Verify that no schema entity type is declared by more than one issuer file, whether under `trusted-issuers/` or `custom-issuers/` ({{custom-issuers}}).
+8. If `custom-issuers/` is present, determine whether the implementation can process each declared entity type ({{custom-issuers}}).
 
 Failure at any REQUIRED validation step SHOULD result in rejecting the policy store for evaluation.
 
@@ -693,7 +678,7 @@ Schema entity type collisions are a privilege-escalation risk: if two issuers co
 
 Because a custom issuer has no configuration document, there is no standard mechanism for key rotation, token status, or revocation. Deployments that accept custom tokens MUST provide these controls through the token processor or surrounding infrastructure.
 
-Declaring a type with `required` set to `false` reduces the evidence a PDP may require at evaluation time. Deployments SHOULD review policies that reference such types to confirm that a decision remains correct when tokens of that type are absent.
+All declared token types are optional, so a PDP may reach a decision with fewer tokens than a deployment anticipated. Deployments SHOULD review policies that reference custom token entity types to confirm that a decision remains correct when tokens of those types are absent.
 
 ## Policy store API
 
@@ -729,8 +714,15 @@ The following JSON Schemas illustrate the structure of normative JSON artifacts.
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["policy_language", "policy_language_version", "policy_store", "governance"],
+  "required": [
+    "policy_store_spec_version",
+    "policy_language",
+    "policy_language_version",
+    "policy_store",
+    "governance"
+  ],
   "properties": {
+    "policy_store_spec_version": { "type": "string", "minLength": 1 },
     "policy_language": { "type": "string", "minLength": 1 },
     "policy_language_version": { "type": "string", "minLength": 1 },
     "policy_store": {
@@ -743,7 +735,9 @@ The following JSON Schemas illustrate the structure of normative JSON artifacts.
         "version": { "type": "string" },
         "created_date": { "type": "string", "format": "date-time" }
       },
-      "governance": {
+      "additionalProperties": false
+    },
+    "governance": {
       "type": "object",
       "required": ["owner", "author", "scope"],
       "properties": {
@@ -773,11 +767,10 @@ The following JSON Schemas illustrate the structure of normative JSON artifacts.
     "token_metadata": {
       "type": "object",
       "patternProperties": {
-        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+        "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$": {
           "type": "object",
+          "required": ["required_claims"],
           "properties": {
-            "trusted": { "type": "boolean", "default": true },
-            "entity_type_name": { "type": "string", "minLength": 1 },
             "required_claims": {
               "type": "array",
               "items": { "type": "string", "minLength": 1 },
@@ -811,9 +804,8 @@ The following JSON Schemas illustrate the structure of normative JSON artifacts.
       "patternProperties": {
         "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$": {
           "type": "object",
-          "minProperties": 1,
+          "required": ["required_claims"],
           "properties": {
-            "required": { "type": "boolean", "default": false },
             "required_claims": {
               "type": "array",
               "items": { "type": "string", "minLength": 1 },
@@ -900,6 +892,7 @@ todo-app-policy-store/
 
 ~~~ json
 {
+  "policy_store_spec_version": "1.0",
   "policy_language": "cedar",
   "policy_language_version": "4.4.0",
   "policy_store": {
@@ -948,6 +941,7 @@ hr-policy-store/
 
 ~~~ json
 {
+  "policy_store_spec_version": "1.0",
   "policy_language": "cel",
   "policy_language_version": "0.25.0",
   "policy_store": {
