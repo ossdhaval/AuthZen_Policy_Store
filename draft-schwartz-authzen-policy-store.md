@@ -557,11 +557,12 @@ PDPs and tools that load policy stores SHOULD perform the following steps:
 1. Detect format (directory or `.cjar` archive) and normalize to a directory view.
 2. Verify required files and directories exist.
 3. Parse and validate `metadata.json`.
-4. Confirm the implementation supports the declared `policy_language` and `policy_language_version`, or reject the store.
-5. If present, load `schema/`; then load policies and optional templates, entities, trusted issuers, and custom issuers according to policy engine rules.
-6. Verify policy engine-specific requirements if any(such as unique policy identifiers).
-7. Verify that no schema entity type is declared by more than one issuer file, whether under `trusted-issuers/` or `custom-issuers/` ({{custom-issuers}}).
-8. If `custom-issuers/` is present, determine whether the implementation can process each declared entity type ({{custom-issuers}}).
+4. Confirm the implementation supports the declared `policy_store_spec_version`. A PDP MUST reject a policy store whose `policy_store_spec_version` it does not implement.
+5. Confirm the implementation supports the declared `policy_language` and `policy_language_version`, or reject the store.
+6. If present, load `schema/`; then load policies and optional templates, entities, trusted issuers, and custom issuers according to policy engine rules.
+7. Verify policy engine-specific requirements if any(such as unique policy identifiers).
+8. Verify that no schema entity type is declared by more than one issuer file, whether under `trusted-issuers/` or `custom-issuers/` ({{custom-issuers}}).
+9. If `custom-issuers/` is present, determine whether the implementation can process each declared entity type ({{custom-issuers}}).
 
 Failure at any REQUIRED validation step SHOULD result in rejecting the policy store for evaluation.
 
@@ -670,7 +671,7 @@ Trusted issuer configuration determines which token issuers a PDP accepts. Incor
 
 Policy stores SHOULD be treated as part of the trusted computing base for authorization decisions. Loading a policy store from an untrusted source without validation is NOT RECOMMENDED.
 
-## Custom issuers
+## Custom issuer
 
 Custom issuer configuration ({{custom-issuers}}) moves credential validation out of the mechanisms defined for trusted issuers and into a deployment-supplied token processor. The token processor part of the trusted computing base for authorization decisions.
 
