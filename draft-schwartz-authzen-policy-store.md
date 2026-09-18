@@ -78,7 +78,7 @@ informative:
 
 This document defines the AuthZEN Policy Store API and the Policy Store format for distributing authorization policies and their associated evaluation artifacts.
 
-The Policy Store API is implemented by a conforming Policy Decision Point (PDP). It provides a standard way to supply authorization policies and the artifacts required to evaluate them to a PDP.
+The Policy Store API is implemented by a conforming Policy Decision Point (PDP). It provides a standard way to supply a PDP with the authorization policies and artifacts it needs to evaluate them.
 
 The Policy Store format defines a canonical, PDP-neutral directory structure for organizing authorization policies and their associated metadata. It provides a common structure for policies, schemas, default entities, trusted token issuers, custom token issuers, and other artifacts required for policy evaluation. Using a well-known structure reduces the need for PDP-specific configuration. It also improves the discoverability and portability of these artifacts across ecosystem tools like policy authoring tools, management, and deployment tools.
 
@@ -350,52 +350,38 @@ The `metadata.json` file provides version and descriptive metadata for the polic
 
 The top-level JSON object MUST contain the following keys:
 
-`policy_store_spec_version`:
-: REQUIRED string. Identifies the version of the AuthZEN Policy Store specification that this policy store conforms to. This revision of the specification defines the value `"1.0"`.
+| Key | Description |
+| :--- | :--- |
+| `policy_store_spec_version` | REQUIRED string. Version of the AuthZEN Policy Store specification that this policy store conforms to. This revision of the specification defines the value `"1.0"`. Consistent with the versioning conventions of the AuthZEN Authorization API ({{AUTHZEN-API}}), the specification version and the endpoint path segment are distinct: version `1.0` corresponds to `v1` in endpoint identifiers, such as the `/access/v1/policy-store` endpoint defined by this specification.|
+| `policy_language` | REQUIRED string. Identifies the policy language (for example, `"cedar"`, `"cel"`). Values SHOULD be lowercase alphanumeric strings; hyphens MAY separate words. |
+| `policy_language_version` | REQUIRED string. Version of the policy language used by artifacts in this store (for example, `"4.4.0"` for Cedar). |
+| `policy_store` | REQUIRED object containing policy store metadata fields defined below. |
+| `governance` | REQUIRED object containing governance-related metadata fields defined below. |
+{: title="Top-level keys of metadata.json"}
 
-: Consistent with the versioning conventions of the AuthZEN Authorization API ({{AUTHZEN-API}}), the specification version and the endpoint path segment are distinct: version `1.0` corresponds to `v1` in endpoint identifiers, such as the `/access/v1/policy-store` endpoint defined by this specification.
 
-`policy_language`:
-: REQUIRED string. Identifies the policy language (for example, `"cedar"`, `"cel"`). Values SHOULD be lowercase alphanumeric strings; hyphens MAY separate words.
-
-`policy_language_version`:
-: REQUIRED string. Version of the policy language used by artifacts in this store (for example, `"4.4.0"` for Cedar).
-
-`policy_store`:
-: REQUIRED object containing policy store metadata fields defined below.
-
-`governance`:
-: REQUIRED object containing governance-related metadata fields defined below.
 
 ### policy_store Object
 
-`id`:
-: REQUIRED string. A unique identifier for the policy store. It MUST be a URI conforming to RFC 3986 and MUST uniquely identify the policy store.
-
-`name`:
-: REQUIRED string. A human-readable name for the policy store.
-
-`description`:
-: OPTIONAL string. A human-readable description.
-
-`version`:
-: OPTIONAL string. A semantic version of the policy store content (for example, `"1.2.0"`).
-
-`created_date`:
-: OPTIONAL string. ISO 8601 date-time when the policy store was created.
+| Key | Description |
+| :--- | :--- |
+| `id` | REQUIRED string. A unique identifier for the policy store. It MUST be a URI conforming to RFC 3986 and MUST uniquely identify the policy store. |
+| `name` | REQUIRED string. A human-readable name for the policy store. |
+| `description` | OPTIONAL string. A human-readable description. |
+| `version` | OPTIONAL string. A semantic version of the policy store content (for example, `"1.2.0"`). |
+| `created_date` | OPTIONAL string. ISO 8601 date-time when the policy store was created. |
+{: title="Keys of the policy_store object"}
 
 Implementations MUST NOT add additional top-level keys to `metadata.json` unless documented by a future revision of this specification. The `policy_store` object MUST NOT contain keys other than those defined here unless documented by a future revision.
 
 ### governance Object
 
-`owner`:
-: A URN identifier that uniquely identifies an organizational entity accountable for the policy store.
-
-`author`:
-: A URN identifier that uniquely identifies an organizational entity that creates or authors the policy store.
-
-`scope`:
-: A URN identifier for the domain or the area within the organization to which the policies in the policy store apply.
+| Key | Description |
+| :--- | :--- |
+| `owner` | REQUIRED string. A URN identifier that uniquely identifies an organizational entity accountable for the policy store. |
+| `author` | REQUIRED string. A URN identifier that uniquely identifies an organizational entity that creates or authors the policy store. |
+| `scope` | REQUIRED string. A URN identifier for the domain or the area within the organization to which the policies in the policy store apply. |
+{: title="Keys of the governance object"}
 
 ### Example (non-normative)
 
@@ -673,8 +659,6 @@ Policy stores SHOULD be treated as part of the trusted computing base for author
 
 Custom issuer configuration ({{custom-issuers}}) moves credential validation out of the mechanisms defined for trusted issuers and into a deployment-supplied token processor. The token processor is part of the trusted computing base for authorization decisions.
 
-Schema entity type collisions are a privilege-escalation risk: if two issuers could declare the same entity type, a token validated under weaker rules could materialize as an entity that policies treat as higher-privilege. This is why {{custom-issuers}} requires entity type declarations to be unique across both custom and trusted issuers within a store.
-
 Because a custom issuer has no configuration document, there is no standard mechanism for key rotation, token status, or revocation. Deployments that accept custom tokens MUST provide these controls through the token processor or surrounding infrastructure.
 
 All declared token types are optional, so a PDP may reach a decision with fewer tokens than a deployment anticipated. Deployments SHOULD review policies that reference custom token entity types to confirm that a decision remains correct when tokens of those types are absent.
@@ -932,8 +916,10 @@ hr-policy-store/
 ├── policies/
 │   └── resource_policies/
 │       └── leave_request.yaml
-└── trusted-issuers/
-    └── corp-idp.json
+├── trusted-issuers/
+│   └── corp-idp.json
+└── custom-issuers/
+    └── hris-api-keys.json
 ~~~
 
 **metadata.json:**
